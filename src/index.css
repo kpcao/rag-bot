@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f1f5f9;
+  --foreground: #1e293b;
+}
+.dark {
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+}
+body {
+  background: var(--background);
+  color: var(--foreground);
+}

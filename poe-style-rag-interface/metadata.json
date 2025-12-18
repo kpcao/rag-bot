@@ -1,0 +1,5 @@
+{
+  "name": "Poe-Style RAG Interface",
+  "description": "A premium, Poe-inspired frontend for RAG bots with Firebase Authentication, Custom Bot creation, and document management.",
+  "requestFramePermissions": []
+}
