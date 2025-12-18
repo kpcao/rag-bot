@@ -33,6 +33,22 @@ export const createBot = async (botData: any) => {
   return response.json();
 };
 
+// ★ 新增：更新 Bot
+export const updateBot = async (botId: string, botData: any) => {
+  const token = await auth.currentUser?.getIdToken();
+  const response = await fetch(`${API_URL}/bots/${botId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'X-User-ID': auth.currentUser?.uid || 'guest'
+    },
+    body: JSON.stringify(botData),
+  });
+  if (!response.ok) throw new Error('Failed to update bot');
+  return response.json();
+};
+
 export const fetchChats = async () => {
   const token = await auth.currentUser?.getIdToken();
   const response = await fetch(`${API_URL}/chats`, {
@@ -100,21 +116,51 @@ export const fetchDocuments = async () => {
   return response.json();
 };
 
-export const uploadFile = async (file: File) => {
+// ★ 修改：改用 XHR 以支持上传进度监听
+export const uploadFile = async (file: File, onProgress?: (percent: number) => void) => {
   const token = await auth.currentUser?.getIdToken();
-  const formData = new FormData();
-  formData.append('file', file);
+  const userId = auth.currentUser?.uid || 'guest';
+  
+  return new Promise<any>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append('file', file);
 
-  const response = await fetch(`${API_URL}/upload`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-User-ID': auth.currentUser?.uid || 'guest'
-    },
-    body: formData,
+    xhr.open('POST', `${API_URL}/upload`);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('X-User-ID', userId);
+
+    // 监听上传进度
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        onProgress(percent);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          resolve(response);
+        } catch (e) {
+          reject(new Error('Invalid JSON response'));
+        }
+      } else {
+        // ★ Fix: Parse backend error message
+        try {
+          const res = JSON.parse(xhr.responseText);
+          reject(new Error(res.error || res.message || xhr.statusText));
+        } catch (e) {
+          reject(new Error(xhr.statusText || 'Upload failed'));
+        }
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error'));
+    
+    xhr.send(formData);
   });
-  if (!response.ok) throw new Error('Failed to upload file');
-  return response.json();
 };
 
 // ★ 补回缺失的 deleteDocument 函数

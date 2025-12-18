@@ -6,6 +6,8 @@ import {
   Paperclip, Loader // ★ 引入 Paperclip 和 Loader
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+// ★ 引入 remark-gfm 以支持表格等高级 Markdown 语法 (可选，如果没安装可以先不加 remarkPlugins)
+import remarkGfm from 'remark-gfm'; 
 // ★ 引入 uploadFile
 import { fetchBots, fetchChats, createChat, streamChat, fetchDocuments, updateChat, uploadFile } from '../services/api';
 import { auth } from '../services/firebase';
@@ -17,6 +19,58 @@ interface Message {
   sources?: any[];
   timestamp?: string;
 }
+
+// ★ 在 Chat 组件外部定义自定义 Markdown 组件样式
+const MarkdownComponents = {
+  // 段落：增加行高和底部间距，颜色微调
+  // ★ 修复：添加 whitespace-pre-wrap 以保留 LLM 输出中的换行符，解决“没换行”的问题
+  p: ({node, ...props}: any) => <p className="mb-4 last:mb-0 leading-7 text-gray-200 whitespace-pre-wrap" {...props} />,
+  
+  // 标题：增加顶部间距，字体加粗，颜色高亮
+  h1: ({node, ...props}: any) => <h1 className="text-2xl font-bold text-white mt-6 mb-4 border-b border-gray-700 pb-2" {...props} />,
+  h2: ({node, ...props}: any) => <h2 className="text-xl font-bold text-blue-100 mt-6 mb-3" {...props} />,
+  h3: ({node, ...props}: any) => <h3 className="text-lg font-semibold text-blue-200 mt-4 mb-2" {...props} />,
+  
+  // 列表：增加左侧缩进和项目间距
+  ul: ({node, ...props}: any) => <ul className="list-disc list-outside ml-5 mb-4 space-y-1 text-gray-200" {...props} />,
+  ol: ({node, ...props}: any) => <ol className="list-decimal list-outside ml-5 mb-4 space-y-1 text-gray-200" {...props} />,
+  li: ({node, ...props}: any) => <li className="pl-1 leading-7" {...props} />,
+  
+  // 代码块：深色背景，圆角
+  code: ({node, inline, className, children, ...props}: any) => {
+    return inline ? (
+      <code className="bg-gray-900/50 px-1.5 py-0.5 rounded text-blue-300 font-mono text-sm border border-gray-700/50" {...props}>
+        {children}
+      </code>
+    ) : (
+      <div className="bg-gray-950 rounded-lg border border-gray-800 p-4 my-4 overflow-x-auto">
+        <code className="text-sm font-mono text-gray-300 block" {...props}>
+          {children}
+        </code>
+      </div>
+    );
+  },
+
+  // 引用：左侧竖线，斜体
+  blockquote: ({node, ...props}: any) => (
+    <blockquote className="border-l-4 border-blue-500/50 pl-4 py-1 my-4 italic text-gray-400 bg-gray-900/30 rounded-r" {...props} />
+  ),
+
+  // 表格：简单的表格样式
+  table: ({node, ...props}: any) => (
+    <div className="overflow-x-auto my-4 rounded-lg border border-gray-700">
+      <table className="min-w-full divide-y divide-gray-700" {...props} />
+    </div>
+  ),
+  th: ({node, ...props}: any) => <th className="bg-gray-800 px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider" {...props} />,
+  td: ({node, ...props}: any) => <td className="bg-gray-900/50 px-3 py-2 text-sm text-gray-300 border-t border-gray-800" {...props} />,
+  
+  // 链接：蓝色高亮
+  a: ({node, ...props}: any) => <a className="text-blue-400 hover:text-blue-300 underline underline-offset-2 transition-colors" target="_blank" rel="noopener noreferrer" {...props} />,
+  
+  // 分割线
+  hr: ({node, ...props}: any) => <hr className="my-6 border-gray-700" {...props} />,
+};
 
 const Chat: React.FC = () => {
   const { chatId } = useParams();
@@ -61,9 +115,10 @@ const Chat: React.FC = () => {
         setChats(chatsData.chats || []);
         setDocuments(docsData.documents || []);
         
-        if (!currentBot && loadedBots.length > 0) {
-          setCurrentBot(loadedBots[0]);
-        }
+        // ★ 修改：不再强制默认选中第一个 Bot，允许为 null (Standard)
+        // if (!currentBot && loadedBots.length > 0) {
+        //   setCurrentBot(loadedBots[0]);
+        // }
       } catch (error) {
         console.error("Error loading data:", error);
       } finally {
@@ -79,6 +134,8 @@ const Chat: React.FC = () => {
 
     if (!chatId) {
       setMessages([]);
+      // ★ 修复：进入新对话时强制清空选中的文档，防止 Context 计数器显示旧数据
+      setSelectedDocIds([]);
       return;
     }
 
@@ -269,32 +326,60 @@ const Chat: React.FC = () => {
   ];
 
   return (
-    <div className="flex h-full bg-gray-900 text-gray-100 overflow-hidden">
+    <div className="flex h-full bg-gray-900 text-gray-100 overflow-hidden relative">
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0 relative">
         
         {/* Header */}
-        <div className="h-16 border-b border-gray-800 flex items-center justify-between px-6 bg-gray-900/95 backdrop-blur z-20">
+        {/* ★ 修复 3: 
+            - 移除 pt-14 硬编码
+            - 使用 style 动态设置 padding-top 适配安全区域
+            - 保持 pl-14 给左侧按钮留位
+        */}
+        <div 
+          className="w-full border-b border-gray-800 flex items-center justify-between px-4 md:px-6 pl-14 md:pl-14 bg-gray-900/95 backdrop-blur z-20 shrink-0"
+          style={{ 
+            paddingTop: 'max(12px, env(safe-area-inset-top) + 12px)',
+            paddingBottom: '12px',
+            height: 'auto'
+          }}
+        >
           
           {/* Bot Selector */}
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 mr-2">
             <button 
               onClick={() => setShowBotSelector(!showBotSelector)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-800 transition-colors max-w-full"
             >
-              <span className="font-semibold text-lg">
+              {/* ★ 修复：移动端截断长名字，防止换行 */}
+              <span className="font-semibold text-base md:text-lg truncate">
                 {currentBot ? currentBot.name : 'Select a Bot'}
               </span>
-              <span className="px-2 py-0.5 bg-gray-800 rounded text-xs text-gray-400 border border-gray-700">
+              {/* ★ 修复：移动端隐藏 Model 标签，节省空间 */}
+              <span className="hidden md:inline px-2 py-0.5 bg-gray-800 rounded text-xs text-gray-400 border border-gray-700 whitespace-nowrap">
                 {currentBot?.model || 'Standard'}
               </span>
-              <ChevronDown size={16} className="text-gray-500" />
+              <ChevronDown size={16} className="text-gray-500 flex-shrink-0" />
             </button>
 
             {showBotSelector && (
               <div className="absolute top-full left-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-xl shadow-xl overflow-hidden z-50">
-                <div className="p-2">
-                  <div className="text-xs font-semibold text-gray-500 px-2 py-1">YOUR BOTS</div>
+                 <div className="p-2">
+                  <div className="text-xs font-semibold text-gray-500 px-2 py-1">SYSTEM</div>
+                  <button
+                    onClick={() => {
+                      setCurrentBot(null);
+                      setShowBotSelector(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
+                      currentBot === null ? 'bg-blue-600 text-white' : 'hover:bg-gray-700 text-gray-300'
+                    }`}
+                  >
+                    <Bot size={16} />
+                    Standard Assistant
+                  </button>
+
+                  <div className="text-xs font-semibold text-gray-500 px-2 py-1 mt-2">YOUR BOTS</div>
                   {bots.map(bot => (
                     <button
                       key={bot.id}
@@ -310,23 +395,32 @@ const Chat: React.FC = () => {
                       {bot.name}
                     </button>
                   ))}
+                  
+                  <button
+                    onClick={() => navigate('/my-bots')}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 text-blue-400 hover:bg-gray-700 mt-1 border-t border-gray-700/50"
+                  >
+                    <Plus size={14} />
+                    Manage Bots
+                  </button>
                 </div>
               </div>
             )}
           </div>
 
           {/* Right Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 md:gap-2 flex-shrink-0">
             <button 
               onClick={() => setShowContextPanel(!showContextPanel)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors border ${
+              className={`flex items-center gap-2 px-2 md:px-3 py-1.5 rounded-lg transition-colors border ${
                 showContextPanel 
                   ? 'bg-blue-600/20 border-blue-500/50 text-blue-400' 
                   : 'hover:bg-gray-800 border-transparent text-gray-400'
               }`}
             >
               <Book size={18} />
-              <span className="text-sm font-medium">Context</span>
+              {/* ★ 修复：移动端隐藏 "Context" 文字 */}
+              <span className="text-sm font-medium hidden md:inline">Context</span>
               {selectedDocIds.length > 0 && (
                 <span className="bg-blue-600 text-white text-[10px] px-1.5 rounded-full">
                   {selectedDocIds.length}
@@ -351,16 +445,16 @@ const Chat: React.FC = () => {
         {/* Chat Content */}
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {!chatId && messages.length === 0 ? (
-            // ★ Empty State with Suggestions
             <div className="h-full flex flex-col items-center justify-center pb-20">
               <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center mb-6 shadow-lg">
                 <Bot size={32} className="text-blue-500" />
               </div>
-              <h2 className="text-2xl font-bold mb-2">Start a new chat</h2>
-              <p className="text-gray-400 mb-8 text-center max-w-md">
+              <h2 className="text-2xl font-bold mb-2 text-center">Start a new chat</h2>
+              <p className="text-gray-400 mb-8 text-center max-w-md px-4">
                 I can help you analyze documents, answer questions, and generate content.
               </p>
               
+              {/* ★ 修复：移动端单列显示建议，防止挤压 */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl px-4">
                 {suggestions.map((s, i) => (
                   <button
@@ -385,21 +479,25 @@ const Chat: React.FC = () => {
                   )}
                   
                   <div className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                    <div className={`rounded-2xl px-5 py-3.5 ${
+                    <div className={`rounded-2xl px-5 py-3.5 shadow-sm ${
                       msg.role === 'user' 
                         ? 'bg-blue-600 text-white' 
-                        : 'bg-gray-800 text-gray-100 border border-gray-700'
+                        : 'bg-gray-800 text-gray-100 border border-gray-700/80' 
                     }`}>
                       {msg.role === 'user' ? (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
                       ) : (
-                        <div className="prose prose-invert prose-sm max-w-none">
-                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        <div className="w-full min-w-0">
+                          <ReactMarkdown 
+                            remarkPlugins={[remarkGfm]} 
+                            components={MarkdownComponents}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
                         </div>
                       )}
                     </div>
 
-                    {/* ★ 修改：Reference 样式优化 */}
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2 items-center">
                         {msg.sources.slice(0, 5).map((source: any, idx: number) => (
@@ -412,13 +510,12 @@ const Chat: React.FC = () => {
                               {source.metadata?.original_filename || 'Document'}
                             </span>
                             
-                            {/* Hover Tooltip: 鼠标悬停时显示详细内容 */}
                             <div className="absolute bottom-full left-0 mb-2 w-72 p-3 bg-gray-900/95 backdrop-blur border border-gray-700 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
                               <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-700/50">
                                 <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Source Content</span>
                                 <span className="text-[10px] text-gray-500">Page {source.metadata?.page || 1}</span>
                               </div>
-                              <p className="text-xs text-gray-300 leading-relaxed line-clamp-6">
+                              <p className="text-xs text-gray-300 leading-relaxed line-clamp-6 break-all whitespace-pre-wrap">
                                 {source.content}
                               </p>
                             </div>
@@ -452,7 +549,6 @@ const Chat: React.FC = () => {
         {/* Input Area */}
         <div className="p-4 bg-gray-900 border-t border-gray-800">
           <div className="max-w-3xl mx-auto relative">
-            {/* ★ 新增：左侧上传按钮 */}
             <label className="absolute left-2 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg cursor-pointer transition-colors z-10">
               {isUploading ? <Loader size={20} className="animate-spin" /> : <Paperclip size={20} />}
               <input 
@@ -471,7 +567,6 @@ const Chat: React.FC = () => {
               onKeyDown={handleKeyDown}
               placeholder="Message Assistant..."
               disabled={streaming}
-              // ★ 修改：增加左侧 padding 以避开图标
               className="w-full bg-gray-800 border border-gray-700 text-white rounded-xl py-3.5 pl-12 pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-lg disabled:opacity-50"
             />
             <button 
@@ -490,14 +585,15 @@ const Chat: React.FC = () => {
 
       {/* Right Context Panel */}
       {showContextPanel && (
-        <div className="w-80 border-l border-gray-800 bg-gray-900 flex flex-col transition-all duration-300 shadow-2xl z-30">
+        // ★ 修复：移动端使用 fixed inset-0 全屏覆盖，桌面端保持右侧边栏
+        <div className="fixed inset-0 z-50 md:static md:z-auto md:w-80 md:border-l border-gray-800 bg-gray-900 flex flex-col transition-all duration-300 shadow-2xl">
           <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900">
             <div>
               <h3 className="font-semibold text-sm text-white">Knowledge Base</h3>
               <p className="text-xs text-gray-400">Select documents to chat with</p>
             </div>
-            <button onClick={() => setShowContextPanel(false)} className="text-gray-400 hover:text-white">
-              <X size={18} />
+            <button onClick={() => setShowContextPanel(false)} className="text-gray-400 hover:text-white p-2">
+              <X size={20} />
             </button>
           </div>
           

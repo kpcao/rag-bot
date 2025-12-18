@@ -1,15 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-// ★ 引入 Sparkles 图标
 import { Bot, Save, ArrowLeft, Loader2, Sparkles } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-// ★ 引入 generateBotProfile
-import { createBot, generateBotProfile } from '../services/api';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { createBot, generateBotProfile, updateBot, fetchBots } from '../services/api';
 
 const BotMaker: React.FC = () => {
   const navigate = useNavigate();
+  const { botId } = useParams();
   const [loading, setLoading] = useState(false);
-  // ★ 新增：生成中的状态
   const [isGenerating, setIsGenerating] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -20,7 +18,29 @@ const BotMaker: React.FC = () => {
     temperature: 0.7
   });
 
-  // ★ 新增：处理自动生成
+  useEffect(() => {
+    if (botId) {
+      const loadBot = async () => {
+        try {
+          const data = await fetchBots();
+          const bot = data.bots.find((b: any) => b.id === botId);
+          if (bot) {
+            setFormData({
+              name: bot.name,
+              description: bot.description || '',
+              instructions: bot.instructions || '',
+              model: bot.model || 'llama3',
+              temperature: bot.temperature || 0.7
+            });
+          }
+        } catch (error) {
+          console.error("Failed to load bot details", error);
+        }
+      };
+      loadBot();
+    }
+  }, [botId]);
+
   const handleAutoGenerate = async () => {
     if (!formData.name.trim()) {
       alert("Please enter a Bot Name first.");
@@ -47,20 +67,28 @@ const BotMaker: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      await createBot(formData);
-      navigate('/');
+      if (botId) {
+        await updateBot(botId, formData);
+      } else {
+        await createBot(formData);
+      }
+      navigate('/my-bots');
     } catch (err) {
-      alert("Failed to create bot");
+      alert("Failed to save bot");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white overflow-y-auto">
-      <div className="max-w-2xl mx-auto p-6">
-        <Link to="/" className="inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition">
-          <ArrowLeft className="w-4 h-4" /> Back to Chat
+    <div className="min-h-full bg-gray-950 text-white overflow-y-auto">
+      {/* ★ 修复: 使用动态 padding */}
+      <div 
+        className="max-w-2xl mx-auto p-6"
+        style={{ paddingTop: 'max(3rem, env(safe-area-inset-top) + 3rem)' }}
+      >
+        <Link to="/my-bots" className="inline-flex items-center gap-2 text-gray-400 hover:text-white mb-6 transition">
+          <ArrowLeft className="w-4 h-4" /> Back to My Bots
         </Link>
         
         <motion.div
@@ -72,7 +100,7 @@ const BotMaker: React.FC = () => {
               <Bot className="w-8 h-8 text-white" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold">Create a Bot</h1>
+              <h1 className="text-3xl font-bold">{botId ? 'Configure Bot' : 'Create a Bot'}</h1>
               <p className="text-gray-400">Customize personality, knowledge, and behavior.</p>
             </div>
           </div>
@@ -108,12 +136,13 @@ const BotMaker: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">Short Description</label>
-                <input
-                  type="text"
+                {/* ★ 修复：input -> textarea，支持自动换行 */}
+                <textarea
+                  rows={3}
                   value={formData.description}
                   onChange={e => setFormData({...formData, description: e.target.value})}
                   placeholder="Helps with React coding questions"
-                  className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 focus:ring-2 focus:ring-brand-500 focus:outline-none transition"
+                  className="w-full bg-gray-950 border border-gray-800 rounded-xl p-3 focus:ring-2 focus:ring-brand-500 focus:outline-none transition resize-none"
                 />
               </div>
 
@@ -170,7 +199,7 @@ const BotMaker: React.FC = () => {
             </div>
 
             <div className="flex justify-end gap-3">
-               <Link to="/" className="px-6 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-medium transition">
+               <Link to="/my-bots" className="px-6 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-medium transition">
                  Cancel
                </Link>
                <button
@@ -179,10 +208,9 @@ const BotMaker: React.FC = () => {
                  className="px-6 py-3 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-medium transition flex items-center gap-2 shadow-lg shadow-brand-900/20"
                >
                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                 Create Bot
+                 {botId ? 'Save Changes' : 'Create Bot'}
                </button>
             </div>
-
           </form>
         </motion.div>
       </div>
